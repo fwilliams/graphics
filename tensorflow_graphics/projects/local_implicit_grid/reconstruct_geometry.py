@@ -85,7 +85,7 @@ def main(argv):
   npts = min(near_surface_samples.shape[0], FLAGS.npoints)-1
 
   print('Performing latent grid optimization...')
-  v, f, _, _ = rec.encode_decoder_one_scene(
+  v, f, g, _ = rec.encode_decoder_one_scene(
       near_surface_samples, FLAGS.ckpt_dir, FLAGS.part_size, overlap=True,
       indep_pt_loss=True, init_std=FLAGS.init_std,
       xmin=xmin, xmax=xmax, res_per_part=res_per_part,
@@ -95,7 +95,7 @@ def main(argv):
   if out_dir and not gfile.exists(out_dir):
     gfile.makedirs(out_dir)
   mesh = trimesh.Trimesh(v, f)
-
+  
   if FLAGS.postprocess:
     print('Postprocessing generated mesh...')
     mesh = postprocess.remove_backface(mesh, surface_points)
@@ -103,6 +103,7 @@ def main(argv):
   print('Writing reconstructed mesh to {}'.format(FLAGS.output_ply))
   with gfile.GFile(FLAGS.output_ply, 'wb') as fh:
     mesh.export(fh, 'ply')
-
+  np.savez(FLAGS.output_ply, grid=g, xmin=xmin, xmax=xmax)
+  
 if __name__ == '__main__':
   app.run(main)

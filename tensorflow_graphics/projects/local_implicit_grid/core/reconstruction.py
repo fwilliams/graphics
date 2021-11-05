@@ -376,4 +376,4 @@ def encode_decoder_one_scene(near_surface_samples, ckpt_dir, part_size,
         float(out_grid.shape[0]) / (float(out_grid.shape[0])-1))
   v += xmin
 
-  return v, f, feat_grid, mask
+  return v, f, out_grid, mask
