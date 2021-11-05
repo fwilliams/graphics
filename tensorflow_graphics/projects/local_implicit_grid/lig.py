@@ -79,6 +79,7 @@ def main():
     argparser.add_argument("input_points_root", type=str)
     argparser.add_argument("output_path", type=str)
     argparser.add_argument("--mode", type=str, default="test")
+    argparser.add_argument("--iters", type=int, default=10_000)
     cmd_args = argparser.parse_args()
 
     for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_root, cmd_args.mode)):
@@ -88,8 +89,9 @@ def main():
         pcu.save_mesh_vn("in_pts.ply", v_in, n_in)
 
         res_per_part = 32
+        part_size = 0.15
         os.system(f"python reconstruct_geometry.py --input_ply in_pts.ply "
-                  f"--part_size=0.15 --npoints=2048 --steps=10000 --res_per_part={res_per_part}")
+                  f"--part_size={part_size} --npoints=2048 --steps={cmd_args.iters} --res_per_part={res_per_part}")
 
         v, f = pcu.load_mesh_vf("in_pts.reconstruct.ply")
 
@@ -100,17 +102,24 @@ def main():
 
         # setup grid
         eps = 1e-6
-        s = (np.array(grid_shape) - 1) / 2.0
-        ll = [np.linspace(xmin[i] + eps, xmax[i] - eps, res_per_part * s[i]) for i in range(3)]
-        xyz = np.stack(np.meshgrid(ll[0], ll[1], ll[2], indexing='ij'), axis=-1).reshape(-1, 3)
+        s = ((np.array(grid_shape) - 1) / 2.0).astype(np.int)
+        print("my s", s)
+        print("my xmin/xmax", xmin, xmax)
+        ll = tuple([np.linspace(xmin[i] + eps, xmax[i] - eps, res_per_part * s[i]) for i in range(3)])
+        # xx, yy, zz = np.meshgrid(ll[0], ll[1], ll[2], indexing='ij')
+        # print(xx.shape, yy.shape, zz.shape, grid.shape)
         # output_grid = np.ones([res_per_part * s[0], res_per_part * s[1],  res_per_part * s[2]],
         #                       dtype=np.float32).reshape(-1)
-        interpolator = RegularGridInterpolator(xyz, grid, bounds_error=False, fill_value=1.0)
+        interpolator = RegularGridInterpolator(ll, grid, bounds_error=False, fill_value=1.0)
         vol_pts = shape['vol_points']
         pred_occ = interpolator(vol_pts) <= 0.0
         gt_occ = shape['vol_occs'] <= 0.0
 
-        np.savez("debugme", pred_occ=pred_occ, gt_occ=gt_occ)
+        print("my l", [(l.min(), l.max()) for l in ll])
+        print("vol_pts min/max", vol_pts.min(0), vol_pts.max(0))
+        print("xmin/xmax", xmin, xmax)
+        print("vmin/vmax", v.min(0), v.max(0))
+        np.savez("debugme", vol_pts=vol_pts, pred_occ=pred_occ, gt_occ=gt_occ)
 
         assert False
 
