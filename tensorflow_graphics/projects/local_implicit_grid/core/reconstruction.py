@@ -366,6 +366,7 @@ def encode_decoder_one_scene(near_surface_samples, ckpt_dir, part_size,
       codelen=params['codelen'], origin=xmin,
       grid_shape=grid_shape, part_size=part_size,
       overlap=overlap, scope='')
+  print(grid_shape)
   feat_grid = goptim.feature_grid[0]
   out_grid = svg.evaluate_feature_grid(feat_grid,
                                        mask=mask,
@@ -376,4 +377,4 @@ def encode_decoder_one_scene(near_surface_samples, ckpt_dir, part_size,
         float(out_grid.shape[0]) / (float(out_grid.shape[0])-1))
   v += xmin
 
-  return v, f, out_grid, mask
+  return v, f, out_grid, grid_shape

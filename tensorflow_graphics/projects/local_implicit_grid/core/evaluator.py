@@ -540,6 +540,7 @@ class SparseLIGEvaluator(object):
       self.res = (np.array(grid_shape) - 1) / 2.0
     else:
       self.res = np.array(grid_shape) - 1
+      assert False, "don't go down this path!!"
     self.res = self.res.astype(np.int32)
     self.xmin = np.array(origin)
     self.xmax = self.xmin + self.res * part_size
@@ -572,6 +573,7 @@ class SparseLIGEvaluator(object):
       output grid.
     """
     # setup grid
+    print(res_per_part)
     eps = 1e-6
     s = self.res
     l = [np.linspace(self.xmin[i]+eps, self.xmax[i]-eps, res_per_part*s[i])
