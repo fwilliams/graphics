@@ -97,12 +97,13 @@ def main():
 
         grid_data = np.load("in_pts.reconstruct.ply.npz")
         grid = grid_data["grid"]
-        xmin, xmax = grid_data["xmin"], grid_data["xmax"]
-        grid_shape = grid_data["grid_shape"]
 
         # setup grid
         eps = 1e-6
+        grid_shape = grid_data["grid_shape"]        
         s = ((np.array(grid_shape) - 1) / 2.0).astype(np.int)
+        xmin, xmax = grid_data["xmin"], grid_data["xmin"] + s * part_size
+
         print("my s", s)
         print("my xmin/xmax", xmin, xmax)
         ll = tuple([np.linspace(xmin[i] + eps, xmax[i] - eps, res_per_part * s[i]) for i in range(3)])
