@@ -72,7 +72,21 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
             "vol_occs": vol_occ
         }
 
+        
+def intersection_over_union(pred, target):
+     """
+     Compute the intersection over union between two indicator sets
+     :param pred: A boolean tensor of shape [*, N] representing an indicator set of size N.
+                  True values indicate points *inside* the set, and false indicate outside value.
+     :param target: A boolean tensor of shape [*, N] representing an indicator set of size N.
+                    True values indicate points *inside* the set, and false indicate outside value.
+     :return: A tensor of shape [*] storing the intersection over union
+     """
+     intersection = np.logical_and(pred, target).sum(-1)
+     union = np.logical_or(pred, target).sum(-1)
+     return intersection / union
 
+    
 def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument("dataset_root", type=str)
@@ -80,6 +94,7 @@ def main():
     argparser.add_argument("output_path", type=str)
     argparser.add_argument("--mode", type=str, default="test")
     argparser.add_argument("--iters", type=int, default=10_000)
+    argparser.add_argument("--part-size", type=float, default=0.25)
     cmd_args = argparser.parse_args()
 
     for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_root, cmd_args.mode)):
@@ -89,7 +104,7 @@ def main():
         pcu.save_mesh_vn("in_pts.ply", v_in, n_in)
 
         res_per_part = 32
-        part_size = 0.15
+        part_size = cmd_args.part_size
         os.system(f"python reconstruct_geometry.py --input_ply in_pts.ply "
                   f"--part_size={part_size} --npoints=2048 --steps={cmd_args.iters} --res_per_part={res_per_part}")
 
@@ -104,22 +119,15 @@ def main():
         s = ((np.array(grid_shape) - 1) / 2.0).astype(np.int)
         xmin, xmax = grid_data["xmin"], grid_data["xmin"] + s * part_size
 
+        ll = tuple([np.linspace(xmin[i] + eps, xmax[i] - eps, res_per_part * s[i]) for i in range(3)])
         print("my s", s)
         print("my xmin/xmax", xmin, xmax)
-        ll = tuple([np.linspace(xmin[i] + eps, xmax[i] - eps, res_per_part * s[i]) for i in range(3)])
-        # xx, yy, zz = np.meshgrid(ll[0], ll[1], ll[2], indexing='ij')
-        # print(xx.shape, yy.shape, zz.shape, grid.shape)
-        # output_grid = np.ones([res_per_part * s[0], res_per_part * s[1],  res_per_part * s[2]],
-        #                       dtype=np.float32).reshape(-1)
+        print("my l", [(l.min(), l.max()) for l in ll])
         interpolator = RegularGridInterpolator(ll, grid, bounds_error=False, fill_value=1.0)
         vol_pts = shape['vol_points']
         pred_occ = interpolator(vol_pts) <= 0.0
         gt_occ = shape['vol_occs'] <= 0.0
-
-        print("my l", [(l.min(), l.max()) for l in ll])
-        print("vol_pts min/max", vol_pts.min(0), vol_pts.max(0))
-        print("xmin/xmax", xmin, xmax)
-        print("vmin/vmax", v.min(0), v.max(0))
+        print(f"IoU: {intersection_over_union(pred_occ, gt_occ)}")
         np.savez("debugme", vol_pts=vol_pts, pred_occ=pred_occ, gt_occ=gt_occ)
 
         assert False
