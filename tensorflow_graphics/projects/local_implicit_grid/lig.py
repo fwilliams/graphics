@@ -1,4 +1,5 @@
 import h5py
+import time
 import os
 import argparse
 import bisect
@@ -25,8 +26,9 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
         "watercraft": "04530566",
     }
 
-    category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
-                      'rifle', 'car', 'table', 'loudspeaker', 'display']
+    # category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
+    #                   'rifle', 'car', 'table', 'loudspeaker', 'display']
+    category_names = ['airplane','lamp','display','rifle','chair','cabinet']
     category_numbers = [category_name_to_number[n] for n in category_names]
     h5paths = [os.path.join(dataset_root, cat + "_" + mode + ".h5") for cat in category_numbers]
     category_end_indices = [0]
@@ -191,6 +193,7 @@ def main():
     chamfer_l2_losses = []
     hausdorff_losses = []
     normal_consistency_losses = []
+    runtimes = []
     for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_root, cmd_args.mode)):
         v_in, n_in = shape['in_points'], shape['in_normals']
         for fname in ["in_pts.ply", "in_pts.reconstruct.ply", "in_pts.reconstruct.ply.npz"]:
@@ -200,9 +203,12 @@ def main():
 
         res_per_part = 32
         part_size = cmd_args.part_size
+        start_time = time.time()
         os.system(f"python reconstruct_geometry.py --input_ply in_pts.ply "
                   f"--part_size={part_size} --npoints=2048 --steps={cmd_args.iters} --res_per_part={res_per_part}")
-
+        end_time = time.time()
+        runtime = end_time - start_time
+        
         v, f = pcu.load_mesh_vf("in_pts.reconstruct.ply")
         n = pcu.estimate_mesh_normals(v, f)
 
@@ -238,14 +244,16 @@ def main():
         chamfer_l2_losses.append(chamfer_distance_l2)
         hausdorff_losses.append(hausdorff_distance)
         normal_consistency_losses.append(normal_similarity)
-        np.savez(os.path.join(cmd_args.output_path, "stats.npz"))
+        runtimes.append(runtime)
+        np.savez(os.path.join(cmd_args.output_path, "stats.npz"), iou_loss=np.array(iou_losses), chamfer_loss_l2=np.array(chamfer_l2_losses),
+                 hausdorff_loss=np.array(hausdorff_losses), norm_similarities=np.array(normal_consistency_losses), runtime=np.array(runtimes))
         if idx % cmd_args.save_every == 0:
             print(f"Saving at iteration {idx}")
             pcu.save_mesh_vfn(os.path.join(cmd_args.output_path, f"recon_{idx}.ply"), v, f, n)
             pcu.save_mesh_vn(os.path.join(cmd_args.output_path, f"pts_{idx}.ply"), v_in, n_in)
             pcu.save_mesh_v(os.path.join(cmd_args.output_path, f"chamfer_pts_{idx}.ply"), gt_surf_pts)
                               
-        print(f"{idx}/{shape['num_shapes']}: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
+        print(f"{idx}/{shape['num_shapes']} {runtime}s: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
         
 
 if __name__ == "__main__":
