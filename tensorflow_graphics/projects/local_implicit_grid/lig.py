@@ -5,6 +5,7 @@ import bisect
 import numpy as np
 import point_cloud_utils as pcu
 from scipy.interpolate import RegularGridInterpolator
+from scipy.spatial import cKDTree
 
 
 def shapenet_shapes(dataset_root, input_pts_root, mode):
@@ -86,7 +87,89 @@ def intersection_over_union(pred, target):
      union = np.logical_or(pred, target).sum(-1)
      return intersection / union
 
+
+def chamfer_distance(pc_p, pc_t, return_index=False, return_individual=False, p_norm=2):
+    """
+    Computes the Chamfer distance between the predicted (p) and target (t) point cloud
+    :param pc_p: predicted point cloud [n,3]
+    :param pc_t: target point cloud [m,3]
+    :param return_index: If true, indices of the closest points will be returned
+    :param return_individual: If true, onesided CD will be returned instead of te twosided one
+    :param p_norm: p of the p-distance
+    :return d_p2t: one sided CD distance of the predicted points to the target ones [n]
+    :return d_t2p: one sided CD distance of the target points to the predicted ones [m]
+    :return nn_idx_p2t: indices of the target points that are the closest to the predicted ones [n]
+    :return nn_idx_t2p: indices of the predicted points that are the closest to the target ones [m]
+    :return cham_dist: two sided mean chamfer distance [1]
+    """
+    tree_p = cKDTree(pc_p)
+    tree_t = cKDTree(pc_t)
+    _, nn_idx_t2p = tree_p.query(pc_t, k=1, p=p_norm)
+    _, nn_idx_p2t = tree_t.query(pc_p, k=1, p=p_norm)
+
+    # Compute the distances
+    d_t2p = np.linalg.norm(pc_p[nn_idx_t2p] - pc_t, axis=-1, ord=p_norm)
+    d_p2t = np.linalg.norm(pc_t[nn_idx_p2t] - pc_p, axis=-1, ord=p_norm)
+    cham_dist = d_t2p.mean() + d_p2t.mean()
+
+    # Handle the return parameters
+    if return_index:
+        if return_individual:
+            return d_p2t, d_t2p, nn_idx_p2t, nn_idx_t2p
+        else:
+            return cham_dist, nn_idx_p2t, nn_idx_t2p
+
+    if return_individual:
+        return d_p2t, d_t2p
+    else:
+        return cham_dist
+
+
+def one_sided_hausdorff_distance(x, y, return_index=False, p_norm=2):
+    tree_x = cKDTree(x)
+    d_y_to_x, i_y_to_x = tree_x.query(y, k=1, p=p_norm)
+    d1 = np.linalg.norm(x[i_y_to_x] - y, axis=-1, ord=p_norm)
+    max_idx = np.argmax(d1)
+    hausdorff = d1[max_idx]
+
+    if return_index:
+        return hausdorff, i_y_to_x[max_idx], max_idx
+    return hausdorff
+
+
+def hausdorff_distance(x, y, return_index=False, p_norm=2):
+    hausdorff_x_to_y, idx_x1, idx_y1 = one_sided_hausdorff_distance(x, y, return_index=True, p_norm=p_norm)
+    hausdorff_y_to_x, idx_y2, idx_x2 = one_sided_hausdorff_distance(y, x, return_index=True, p_norm=p_norm)
+
+    hausdorff = max(hausdorff_x_to_y, hausdorff_y_to_x)
+    if return_index and hausdorff_x_to_y > hausdorff_y_to_x:
+        return hausdorff, idx_x1, idx_y1
+    elif return_index and hausdorff_x_to_y <= hausdorff_y_to_x:
+        return hausdorff, idx_x2, idx_y2
+    return hausdorff
+
+
+def normals_similarity(normals_pre, normals_tgt, idx):
+    """
+    Compute the normal vector similarity metric
+    :param normals_pre: Numpy array of the predicted normal vectors [n, 3]
+    :param normals_tgt: Numpy array of the target (GT) normal vectors [n, 3]
+    :param idx: indices of the closest points in the target point cloud (source -> target) [n]
+    :return norm_similarity: similarity measure of the normal vectors [n]
+    """
+    # Normalize the normal vectors to unit length
+    normals_pre = normals_pre / np.linalg.norm(normals_pre, axis=-1, keepdims=True)
+    normals_tgt = normals_tgt / np.linalg.norm(normals_tgt, axis=-1, keepdims=True)
+
+    normals_dot_product = (normals_tgt[idx] * normals_pre).sum(axis=-1)
     
+    # Handle normals that point into wrong direction gracefully
+    # (mostly due to mehtod not caring about this in generation)
+    norm_similarity = np.abs(normals_dot_product)
+
+    return norm_similarity.mean()
+
+
 def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument("dataset_root", type=str)
@@ -94,7 +177,7 @@ def main():
     argparser.add_argument("output_path", type=str)
     argparser.add_argument("--mode", type=str, default="test")
     argparser.add_argument("--iters", type=int, default=10_000)
-    argparser.add_argument("--part-size", type=float, default=0.25)
+    argparser.add_argument("--part-size", type=float, default=0.33)
     cmd_args = argparser.parse_args()
 
     for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_root, cmd_args.mode)):
@@ -109,25 +192,36 @@ def main():
                   f"--part_size={part_size} --npoints=2048 --steps={cmd_args.iters} --res_per_part={res_per_part}")
 
         v, f = pcu.load_mesh_vf("in_pts.reconstruct.ply")
+        n = pcu.estimate_mesh_normals(v, f)
 
         grid_data = np.load("in_pts.reconstruct.ply.npz")
         grid = grid_data["grid"]
 
-        # setup grid
+        # Sample reconstructed grid
         eps = 1e-6
         grid_shape = grid_data["grid_shape"]        
         s = ((np.array(grid_shape) - 1) / 2.0).astype(np.int)
         xmin, xmax = grid_data["xmin"], grid_data["xmin"] + s * part_size
-
         ll = tuple([np.linspace(xmin[i] + eps, xmax[i] - eps, res_per_part * s[i]) for i in range(3)])
-        print("my s", s)
-        print("my xmin/xmax", xmin, xmax)
-        print("my l", [(l.min(), l.max()) for l in ll])
         interpolator = RegularGridInterpolator(ll, grid, bounds_error=False, fill_value=1.0)
         vol_pts = shape['vol_points']
-        pred_occ = interpolator(vol_pts) <= 0.0
+
+        # IoU
         gt_occ = shape['vol_occs'] <= 0.0
-        print(f"IoU: {intersection_over_union(pred_occ, gt_occ)}")
+        pred_occ = interpolator(vol_pts) <= 0.0
+        fid, bc = pcu.sample_mesh_random(v, f, 100_000)
+        gt_surf_pts = shape['surf_points']
+        pred_surf_pts = pcu.interpolate_barycentric_coords(f, fid, bc, v)
+        gt_surf_nms = shape['surf_points']
+        pred_surf_nms = pcu.interpolate_barycentric_coords(f, fid, bc, n)
+        
+        cd_p2t, cd_t2p, nn_idx_p2t, nn_idx_t2p = chamfer_distance(pred_surf_pts, gt_surf_pts,
+                                                                  return_index=True, return_individual=True)
+        chamfer_distance_l2 = 0.5 * (cd_p2t.mean() + cd_t2p.mean())
+        hausdorff_distance_l2 = hausdorff_distance(pred_surf_pts, gt_surf_pts)
+        normal_similarity = normals_similarity(pred_surf_nms, gt_surf_nms, nn_idx_p2t)
+        iou = intersection_over_union(pred_occ, gt_occ)
+        print(f"IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
         np.savez("debugme", vol_pts=vol_pts, pred_occ=pred_occ, gt_occ=gt_occ)
 
         assert False
