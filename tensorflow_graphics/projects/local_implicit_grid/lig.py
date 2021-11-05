@@ -70,7 +70,8 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
             "surf_points": surf_pts,
             "surf_normals": surf_nms,
             "vol_points": vol_pts,
-            "vol_occs": vol_occ
+            "vol_occs": vol_occ,
+            "num_shapes": total_num_shapes
         }
 
         
@@ -178,12 +179,23 @@ def main():
     argparser.add_argument("--mode", type=str, default="test")
     argparser.add_argument("--iters", type=int, default=10_000)
     argparser.add_argument("--part-size", type=float, default=0.33)
+    argparser.add_argument("--save-every", type=int, default=20)
     cmd_args = argparser.parse_args()
 
+    if not os.path.exists(cmd_args.output_path):
+        os.makedirs(cmd_args.output_path)
+    else:
+        assert False, "Unwilling to overwrite existing data"
+        
+    iou_losses = []
+    chamfer_l2_losses = []
+    hausdorff_losses = []
+    normal_consistency_losses = []
     for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_root, cmd_args.mode)):
         v_in, n_in = shape['in_points'], shape['in_normals']
-        if os.path.exists("in_pts.ply"):
-            os.remove("in_pts.ply")
+        for fname in ["in_pts.ply", "in_pts.reconstruct.ply", "in_pts.reconstruct.ply.npz"]:
+            if os.path.exists(fname):
+                os.remove(fname)
         pcu.save_mesh_vn("in_pts.ply", v_in, n_in)
 
         res_per_part = 32
@@ -219,13 +231,22 @@ def main():
                                                                   return_index=True, return_individual=True)
         chamfer_distance_l2 = 0.5 * (cd_p2t.mean() + cd_t2p.mean())
         hausdorff_distance_l2 = hausdorff_distance(pred_surf_pts, gt_surf_pts)
-        normal_similarity = normals_similarity(pred_surf_nms, gt_surf_nms, nn_idx_p2t)
+        normal_similarity = max(normals_similarity(pred_surf_nms, gt_surf_nms, nn_idx_p2t), normals_similarity(-pred_surf_nms, gt_surf_nms, nn_idx_p2t))
         iou = intersection_over_union(pred_occ, gt_occ)
-        print(f"IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
-        np.savez("debugme", vol_pts=vol_pts, pred_occ=pred_occ, gt_occ=gt_occ)
 
-        assert False
-
+        iou_losses.append(iou)
+        chamfer_l2_losses.append(chamfer_distance_l2)
+        hausdorff_losses.append(hausdorff_distance)
+        normal_consistency_losses.append(normal_similarity)
+        np.savez(os.path.join(cmd_args.output_path, "stats.npz"))
+        if idx % cmd_args.save_every == 0:
+            print(f"Saving at iteration {idx}")
+            pcu.save_mesh_vfn(os.path.join(cmd_args.output_path, f"recon_{idx}.ply"), v, f, n)
+            pcu.save_mesh_vn(os.path.join(cmd_args.output_path, f"pts_{idx}.ply"), v_in, n_in)
+            pcu.save_mesh_v(os.path.join(cmd_args.output_path, f"chamfer_pts_{idx}.ply"), gt_surf_pts)
+                              
+        print(f"{idx}/{shape['num_shapes']}: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
+        
 
 if __name__ == "__main__":
     main()

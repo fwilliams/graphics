@@ -573,7 +573,6 @@ class SparseLIGEvaluator(object):
       output grid.
     """
     # setup grid
-    print(res_per_part)
     eps = 1e-6
     s = self.res
     l = [np.linspace(self.xmin[i]+eps, self.xmax[i]-eps, res_per_part*s[i])
