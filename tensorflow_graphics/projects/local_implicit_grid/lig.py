@@ -1,13 +1,13 @@
-import h5py
-import time
-import os
 import argparse
 import bisect
+import os
+import time
+
+import h5py
 import numpy as np
 import point_cloud_utils as pcu
 from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial import cKDTree
-
 
 category_name_to_number = {
     "airplane": "02691156",
@@ -25,7 +25,7 @@ category_name_to_number = {
     "watercraft": "04530566",
 }
 
-    
+
 def category_names_to_indices(subcategories, dataset_root, mode):
     category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
                       'rifle', 'car', 'table', 'loudspeaker', 'display']
@@ -35,13 +35,14 @@ def category_names_to_indices(subcategories, dataset_root, mode):
     for h5path in h5paths:
         with h5py.File(h5path, "r") as h5f:
             category_end_indices.append(h5f["surface_points/points"].shape[0] + category_end_indices[-1])
-    name_to_indices = {category_names[i]: (category_end_indices[i], category_end_indices[i+1]) for i in range(len(category_names))}
+    name_to_indices = {category_names[i]: (category_end_indices[i], category_end_indices[i+1])
+                       for i in range(len(category_names))}
     indices = []
     for category in subcategories:
         indices.append(np.arange(*name_to_indices[category]))
     return np.concatenate(indices)
-                       
-            
+
+
 def shapenet_shapes(dataset_root, input_pts_root, mode):
 
     # category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
@@ -58,10 +59,11 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
     total_num_shapes = category_end_indices[-1]
     h5f = [h5py.File(h5path, "r") for h5path in h5paths]
     inptsf = h5py.File(input_pts_root, "r")
-    index_map = category_names_to_indices(category_names, dataset_root, mode)
+    assert total_num_shapes == len(inptsf["input_points/points"])
 
-    assert len(index_map) == total_num_shapes
-            
+    # index_map = category_names_to_indices(category_names, dataset_root, mode)
+    # assert len(index_map) == total_num_shapes
+
     for idx in range(total_num_shapes):
         # retrieve the file idx and shape idx within that file
         file_idx = bisect.bisect_right(category_end_indices, idx) - 1
@@ -70,10 +72,10 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
         # Hardcoded transformation that makes all points live in [-1, 1]^3
         translate, scale = 0.0, 2.0
 
-        in_pts = inptsf["input_points/points"][index_map[idx]].astype(np.float32)
+        in_pts = inptsf["input_points/points"][idx].astype(np.float32)
         in_pts = scale * (in_pts + translate)
 
-        in_nms = inptsf["input_points/normals"][index_map[idx]].astype(np.float32)
+        in_nms = inptsf["input_points/normals"][idx].astype(np.float32)
 
         surf_pts = h5f[file_idx]["surface_points/points"][shape_idx].astype(np.float32)
         surf_pts = scale * (surf_pts + translate)
@@ -98,19 +100,19 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
             "num_shapes": total_num_shapes
         }
 
-        
+
 def intersection_over_union(pred, target):
-     """
-     Compute the intersection over union between two indicator sets
-     :param pred: A boolean tensor of shape [*, N] representing an indicator set of size N.
-                  True values indicate points *inside* the set, and false indicate outside value.
-     :param target: A boolean tensor of shape [*, N] representing an indicator set of size N.
-                    True values indicate points *inside* the set, and false indicate outside value.
-     :return: A tensor of shape [*] storing the intersection over union
-     """
-     intersection = np.logical_and(pred, target).sum(-1)
-     union = np.logical_or(pred, target).sum(-1)
-     return intersection / union
+    """
+    Compute the intersection over union between two indicator sets
+    :param pred: A boolean tensor of shape [*, N] representing an indicator set of size N.
+                 True values indicate points *inside* the set, and false indicate outside value.
+    :param target: A boolean tensor of shape [*, N] representing an indicator set of size N.
+                   True values indicate points *inside* the set, and false indicate outside value.
+    :return: A tensor of shape [*] storing the intersection over union
+    """
+    intersection = np.logical_and(pred, target).sum(-1)
+    union = np.logical_or(pred, target).sum(-1)
+    return intersection / union
 
 
 def chamfer_distance(pc_p, pc_t, return_index=False, return_individual=False, p_norm=2):
@@ -187,7 +189,7 @@ def normals_similarity(normals_pre, normals_tgt, idx):
     normals_tgt = normals_tgt / np.linalg.norm(normals_tgt, axis=-1, keepdims=True)
 
     normals_dot_product = (normals_tgt[idx] * normals_pre).sum(axis=-1)
-    
+
     # Handle normals that point into wrong direction gracefully
     # (mostly due to mehtod not caring about this in generation)
     norm_similarity = np.abs(normals_dot_product)
@@ -210,7 +212,7 @@ def main():
         os.makedirs(cmd_args.output_path)
     else:
         assert False, "Unwilling to overwrite existing data"
-        
+
     iou_losses = []
     chamfer_l2_losses = []
     hausdorff_losses = []
@@ -232,7 +234,7 @@ def main():
                   f"--part_size={part_size} --npoints=2048 --steps={cmd_args.iters} --res_per_part={res_per_part}")
         end_time = time.time()
         runtime = end_time - start_time
-        
+
         v, f = pcu.load_mesh_vf("in_pts.reconstruct.ply")
         n = pcu.estimate_mesh_normals(v, f)
 
@@ -241,7 +243,7 @@ def main():
 
         # Sample reconstructed grid
         eps = 1e-6
-        grid_shape = grid_data["grid_shape"]        
+        grid_shape = grid_data["grid_shape"]
         s = ((np.array(grid_shape) - 1) / 2.0).astype(np.int)
         xmin, xmax = grid_data["xmin"], grid_data["xmin"] + s * part_size
         ll = tuple([np.linspace(xmin[i] + eps, xmax[i] - eps, res_per_part * s[i]) for i in range(3)])
@@ -256,7 +258,7 @@ def main():
         pred_surf_pts = pcu.interpolate_barycentric_coords(f, fid, bc, v)
         gt_surf_nms = shape['surf_points']
         pred_surf_nms = pcu.interpolate_barycentric_coords(f, fid, bc, n)
-        
+
         cd_p2t, cd_t2p, nn_idx_p2t, nn_idx_t2p = chamfer_distance(pred_surf_pts, gt_surf_pts,
                                                                   return_index=True, return_individual=True)
         chamfer_distance_l2 = 0.5 * (cd_p2t.mean() + cd_t2p.mean())
@@ -276,9 +278,9 @@ def main():
             pcu.save_mesh_vfn(os.path.join(cmd_args.output_path, f"recon_{idx}.ply"), v, f, n)
             pcu.save_mesh_vn(os.path.join(cmd_args.output_path, f"pts_{idx}.ply"), v_in, n_in)
             pcu.save_mesh_v(os.path.join(cmd_args.output_path, f"chamfer_pts_{idx}.ply"), gt_surf_pts)
-                              
+
         print(f"{idx}/{shape['num_shapes']} {runtime}s: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
-        
+
 
 if __name__ == "__main__":
     main()
