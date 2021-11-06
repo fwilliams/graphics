@@ -28,7 +28,8 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
 
     # category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
     #                   'rifle', 'car', 'table', 'loudspeaker', 'display']
-    category_names = ['airplane','lamp','display','rifle','chair','cabinet']
+    # category_names = ['airplane','lamp','display','rifle','chair','cabinet']
+    category_names = ['bench', 'car', 'loudspeaker', 'sofa', 'table', 'telephone', 'watercraft']
     category_numbers = [category_name_to_number[n] for n in category_names]
     h5paths = [os.path.join(dataset_root, cat + "_" + mode + ".h5") for cat in category_numbers]
     category_end_indices = [0]
