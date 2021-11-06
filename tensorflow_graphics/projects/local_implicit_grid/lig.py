@@ -43,8 +43,9 @@ def category_names_to_indices(subcategories, dataset_root, mode):
     return np.concatenate(indices)
 
 
-def shapenet_shapes(dataset_root, input_pts_root, mode):
+def shapenet_shapes(dataset_root, input_points_h5, mode, shuffle=True):
 
+    assert not shuffle
     # category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
     #                   'rifle', 'car', 'table', 'loudspeaker', 'display']
     # category_names = ['airplane','lamp','display','rifle','chair','cabinet']
@@ -58,13 +59,13 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
 
     total_num_shapes = category_end_indices[-1]
     h5f = [h5py.File(h5path, "r") for h5path in h5paths]
-    inptsf = h5py.File(input_pts_root, "r")
+    inptsf = h5py.File(input_points_h5, "r")
     assert total_num_shapes == len(inptsf["input_points/points"])
 
     # index_map = category_names_to_indices(category_names, dataset_root, mode)
     # assert len(index_map) == total_num_shapes
-
-    for idx in range(total_num_shapes):
+    indexes = np.random.permutation(total_num_shapes) if shuffle else range(total_num_shapes)
+    for idx in indexes:
         # retrieve the file idx and shape idx within that file
         file_idx = bisect.bisect_right(category_end_indices, idx) - 1
         shape_idx = idx - category_end_indices[file_idx]
@@ -200,12 +201,14 @@ def normals_similarity(normals_pre, normals_tgt, idx):
 def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument("dataset_root", type=str)
-    argparser.add_argument("input_points_root", type=str)
+    argparser.add_argument("input_points_h5", type=str)
     argparser.add_argument("output_path", type=str)
     argparser.add_argument("--mode", type=str, default="test")
     argparser.add_argument("--iters", type=int, default=10_000)
     argparser.add_argument("--part-size", type=float, default=0.33)
+    argparser.add_argument("--absolute", action="store_true")
     argparser.add_argument("--save-every", type=int, default=20)
+    argparser.add_argument("--shuffle", action="store_true")
     cmd_args = argparser.parse_args()
 
     if not os.path.exists(cmd_args.output_path):
@@ -213,12 +216,14 @@ def main():
     else:
         assert False, "Unwilling to overwrite existing data"
 
+
     iou_losses = []
     chamfer_l2_losses = []
     hausdorff_losses = []
     normal_consistency_losses = []
     runtimes = []
-    for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_root, cmd_args.mode)):
+    for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_h5,
+                                                cmd_args.mode, shuffle=cmd_args.shuffle)):
         v_in, n_in = shape['in_points'], shape['in_normals']
         for fname in ["in_pts.ply", "in_pts.reconstruct.ply", "in_pts.reconstruct.ply.npz"]:
             if os.path.exists(fname):
@@ -226,9 +231,12 @@ def main():
         pcu.save_mesh_vn("in_pts.ply", v_in, n_in)
 
         res_per_part = 32
+
         min_bb = np.min(np.max(v_in, axis=0) - np.min(v_in, axis=0))
-        part_size = cmd_args.part_size if cmd_args.part_size > 0.0 else abs(cmd_args.part_size) * min_bb
+        part_size = cmd_args.part_size if cmd_args.absolute else cmd_args.part_size * min_bb
+        assert cmd_args.part_size > 0
         print(f"part_size = {part_size}")
+
         start_time = time.time()
         os.system(f"python reconstruct_geometry.py --input_ply in_pts.ply "
                   f"--part_size={part_size} --npoints=2048 --steps={cmd_args.iters} --res_per_part={res_per_part}")
@@ -263,7 +271,8 @@ def main():
                                                                   return_index=True, return_individual=True)
         chamfer_distance_l2 = 0.5 * (cd_p2t.mean() + cd_t2p.mean())
         hausdorff_distance_l2 = hausdorff_distance(pred_surf_pts, gt_surf_pts)
-        normal_similarity = max(normals_similarity(pred_surf_nms, gt_surf_nms, nn_idx_p2t), normals_similarity(-pred_surf_nms, gt_surf_nms, nn_idx_p2t))
+        normal_similarity = max(normals_similarity(pred_surf_nms, gt_surf_nms, nn_idx_p2t),
+                                normals_similarity(-pred_surf_nms, gt_surf_nms, nn_idx_p2t))
         iou = intersection_over_union(pred_occ, gt_occ)
 
         iou_losses.append(iou)
@@ -271,15 +280,20 @@ def main():
         hausdorff_losses.append(hausdorff_distance)
         normal_consistency_losses.append(normal_similarity)
         runtimes.append(runtime)
-        np.savez(os.path.join(cmd_args.output_path, "stats.npz"), iou_loss=np.array(iou_losses), chamfer_loss_l2=np.array(chamfer_l2_losses),
-                 hausdorff_loss=np.array(hausdorff_losses), norm_similarities=np.array(normal_consistency_losses), runtime=np.array(runtimes))
+        np.savez(os.path.join(cmd_args.output_path, "stats.npz"),
+                 iou_loss=np.array(iou_losses),
+                 chamfer_loss_l2=np.array(chamfer_l2_losses),
+                 hausdorff_loss=np.array(hausdorff_losses),
+                 norm_similarities=np.array(normal_consistency_losses),
+                 runtime=np.array(runtimes))
         if idx % cmd_args.save_every == 0:
             print(f"Saving at iteration {idx}")
             pcu.save_mesh_vfn(os.path.join(cmd_args.output_path, f"recon_{idx}.ply"), v, f, n)
             pcu.save_mesh_vn(os.path.join(cmd_args.output_path, f"pts_{idx}.ply"), v_in, n_in)
             pcu.save_mesh_v(os.path.join(cmd_args.output_path, f"chamfer_pts_{idx}.ply"), gt_surf_pts)
 
-        print(f"{idx}/{shape['num_shapes']} {runtime}s: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
+        print(f"{idx}/{shape['num_shapes']} {runtime}s: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, "
+              f"Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
 
 
 if __name__ == "__main__":
