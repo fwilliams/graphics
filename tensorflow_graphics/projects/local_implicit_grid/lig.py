@@ -8,23 +8,40 @@ import point_cloud_utils as pcu
 from scipy.interpolate import RegularGridInterpolator
 from scipy.spatial import cKDTree
 
+category_name_to_number = {
+    "airplane": "02691156",
+    "bench": "02828884",
+    "cabinet": "02933112",
+    "car": "02958343",
+    "chair": "03001627",
+    "display": "03211117",
+    "lamp": "03636649",
+    "loudspeaker": "03691459",
+    "rifle": "04090263",
+    "sofa": "04256520",
+    "table": "04379243",
+    "telephone": "04401088",
+    "watercraft": "04530566",
+}
 
+    
+def category_names_to_indices(subcategories, dataset_root, mode):
+    category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
+                      'rifle', 'car', 'table', 'loudspeaker', 'display']
+    category_numbers = [category_name_to_number[n] for n in category_names]
+    h5paths = [os.path.join(dataset_root, cat + "_" + mode + ".h5") for cat in category_numbers]
+    category_end_indices = [0]
+    for h5path in h5paths:
+        with h5py.File(h5path, "r") as h5f:
+            category_end_indices.append(h5f["surface_points/points"].shape[0] + category_end_indices[-1])
+    name_to_indices = {category_names[i]: (category_end_indices[i], category_end_indices[i+1]) for i in range(len(category_names))}
+    indices = []
+    for category in subcategories:
+        indices.append(np.arange(*name_to_indices[category]))
+    return np.concatenate(indices)
+                       
+            
 def shapenet_shapes(dataset_root, input_pts_root, mode):
-    category_name_to_number = {
-        "airplane": "02691156",
-        "bench": "02828884",
-        "cabinet": "02933112",
-        "car": "02958343",
-        "chair": "03001627",
-        "display": "03211117",
-        "lamp": "03636649",
-        "loudspeaker": "03691459",
-        "rifle": "04090263",
-        "sofa": "04256520",
-        "table": "04379243",
-        "telephone": "04401088",
-        "watercraft": "04530566",
-    }
 
     # category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
     #                   'rifle', 'car', 'table', 'loudspeaker', 'display']
@@ -40,7 +57,10 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
     total_num_shapes = category_end_indices[-1]
     h5f = [h5py.File(h5path, "r") for h5path in h5paths]
     inptsf = h5py.File(input_pts_root, "r")
+    index_map = category_names_to_indices(category_names, dataset_root, mode)
 
+    assert len(index_map) == total_num_shapes
+            
     for idx in range(total_num_shapes):
         # retrieve the file idx and shape idx within that file
         file_idx = bisect.bisect_right(category_end_indices, idx) - 1
@@ -49,10 +69,10 @@ def shapenet_shapes(dataset_root, input_pts_root, mode):
         # Hardcoded transformation that makes all points live in [-1, 1]^3
         translate, scale = 0.0, 2.0
 
-        in_pts = inptsf["input_points/points"][idx].astype(np.float32)
+        in_pts = inptsf["input_points/points"][index_map[idx]].astype(np.float32)
         in_pts = scale * (in_pts + translate)
 
-        in_nms = inptsf["input_points/normals"][idx].astype(np.float32)
+        in_nms = inptsf["input_points/normals"][index_map[idx]].astype(np.float32)
 
         surf_pts = h5f[file_idx]["surface_points/points"][shape_idx].astype(np.float32)
         surf_pts = scale * (surf_pts + translate)
