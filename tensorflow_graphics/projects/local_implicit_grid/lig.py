@@ -226,7 +226,7 @@ def main():
         res_per_part = 32
         min_bb = np.min(np.max(v_in, axis=0) - np.min(v_in, axis=0))
         part_size = cmd_args.part_size if cmd_args.part_size > 0.0 else abs(cmd_args.part_size) * min_bb
-        print("part_size = {part_size}")
+        print(f"part_size = {part_size}")
         start_time = time.time()
         os.system(f"python reconstruct_geometry.py --input_ply in_pts.ply "
                   f"--part_size={part_size} --npoints=2048 --steps={cmd_args.iters} --res_per_part={res_per_part}")
