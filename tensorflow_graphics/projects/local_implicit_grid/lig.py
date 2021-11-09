@@ -43,7 +43,7 @@ def category_names_to_indices(subcategories, dataset_root, mode):
     return np.concatenate(indices)
 
 
-def shapenet_shapes(dataset_root, input_points_h5, mode, shuffle=True):
+def shapenet_shapes(dataset_root, input_points_h5, mode, start_from=0, shuffle=False):
 
     assert not shuffle
     # category_names = ['chair', 'cabinet', 'airplane', 'watercraft', 'telephone', 'lamp', 'bench', 'sofa',
@@ -64,7 +64,7 @@ def shapenet_shapes(dataset_root, input_points_h5, mode, shuffle=True):
 
     # index_map = category_names_to_indices(category_names, dataset_root, mode)
     # assert len(index_map) == total_num_shapes
-    indexes = np.random.permutation(total_num_shapes) if shuffle else range(total_num_shapes)
+    indexes = np.random.permutation(total_num_shapes)[start_from:] if shuffle else range(start_from, total_num_shapes)
     for idx in indexes:
         # retrieve the file idx and shape idx within that file
         file_idx = bisect.bisect_right(category_end_indices, idx) - 1
@@ -209,21 +209,32 @@ def main():
     argparser.add_argument("--absolute", action="store_true")
     argparser.add_argument("--save-every", type=int, default=20)
     argparser.add_argument("--shuffle", action="store_true")
+    argparser.add_argument("--resume", action="store_true")
     cmd_args = argparser.parse_args()
 
-    if not os.path.exists(cmd_args.output_path):
+    if not os.path.exists(cmd_args.output_path) and not cmd_args.resume:
         os.makedirs(cmd_args.output_path)
+        iou_losses = []
+        chamfer_l2_losses = []
+        hausdorff_losses = []
+        normal_consistency_losses = []
+        runtimes = []
+        start_from = 0
+    elif cmd_args.resume:
+        stats = np.load(os.path.join(cmd_args.output_path, "stats.npz"))
+        iou_losses = list(stats['iou_loss'])
+        chamfer_l2_losses = list(stats['chamfer_loss_l2'])
+        hausdorff_losses = list(stats['hausdorff_loss'])
+        normal_consistency_losses = list(stats['norm_similarities'])
+        runtimes = list(stats['runtimes'])
+        assert len(iou_losses) == len(chamfer_l2_losses) == len(hausdorff_losses) == \
+               len(normal_consistency_losses) == len(runtimes)
+        start_from = len(iou_losses)
     else:
         assert False, "Unwilling to overwrite existing data"
 
-
-    iou_losses = []
-    chamfer_l2_losses = []
-    hausdorff_losses = []
-    normal_consistency_losses = []
-    runtimes = []
     for idx, shape in enumerate(shapenet_shapes(cmd_args.dataset_root, cmd_args.input_points_h5,
-                                                cmd_args.mode, shuffle=cmd_args.shuffle)):
+                                                cmd_args.mode, start_from=start_from, shuffle=cmd_args.shuffle)):
         v_in, n_in = shape['in_points'], shape['in_normals']
         for fname in ["in_pts.ply", "in_pts.reconstruct.ply", "in_pts.reconstruct.ply.npz"]:
             if os.path.exists(fname):
@@ -286,13 +297,14 @@ def main():
                  hausdorff_loss=np.array(hausdorff_losses),
                  norm_similarities=np.array(normal_consistency_losses),
                  runtime=np.array(runtimes))
-        if idx % cmd_args.save_every == 0:
-            print(f"Saving at iteration {idx}")
-            pcu.save_mesh_vfn(os.path.join(cmd_args.output_path, f"recon_{idx}.ply"), v, f, n)
-            pcu.save_mesh_vn(os.path.join(cmd_args.output_path, f"pts_{idx}.ply"), v_in, n_in)
-            pcu.save_mesh_v(os.path.join(cmd_args.output_path, f"chamfer_pts_{idx}.ply"), gt_surf_pts)
+        real_idx = idx + start_from
+        if real_idx % cmd_args.save_every == 0:
+            print(f"Saving at iteration {real_idx}")
+            pcu.save_mesh_vfn(os.path.join(cmd_args.output_path, f"recon_{real_idx}.ply"), v, f, n)
+            pcu.save_mesh_vn(os.path.join(cmd_args.output_path, f"pts_{real_idx}.ply"), v_in, n_in)
+            pcu.save_mesh_v(os.path.join(cmd_args.output_path, f"chamfer_pts_{real_idx}.ply"), gt_surf_pts)
 
-        print(f"{idx}/{shape['num_shapes']} {runtime}s: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, "
+        print(f"{real_idx}/{shape['num_shapes']} {runtime}s: IoU: {iou}, Chamfer L2: {chamfer_distance_l2}, "
               f"Hausdorff Distance: {hausdorff_distance_l2}, Normal Consistency: {normal_similarity}")
 
 
