@@ -221,7 +221,7 @@ def main():
         runtimes = []
         start_from = 0
     elif cmd_args.resume:
-        stats = np.load(os.path.join(cmd_args.output_path, "stats.npz"))
+        stats = np.load(os.path.join(cmd_args.output_path, "stats.npz"), allow_pickle=True)
         iou_losses = list(stats['iou_loss'])
         chamfer_l2_losses = list(stats['chamfer_loss_l2'])
         hausdorff_losses = list(stats['hausdorff_loss'])
