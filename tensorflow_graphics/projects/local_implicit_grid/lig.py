@@ -210,6 +210,7 @@ def main():
     argparser.add_argument("--save-every", type=int, default=20)
     argparser.add_argument("--shuffle", action="store_true")
     argparser.add_argument("--resume", action="store_true")
+    argparser.add_argument("--min-size", type=float, default=-1.0)
     cmd_args = argparser.parse_args()
 
     if not os.path.exists(cmd_args.output_path) and not cmd_args.resume:
@@ -247,6 +248,8 @@ def main():
         min_bb = np.min(np.max(v_in, axis=0) - np.min(v_in, axis=0))
         part_size = cmd_args.part_size if cmd_args.absolute else cmd_args.part_size * min_bb
         assert cmd_args.part_size > 0
+        if cmd_args.min_size > 0.0:
+            part_size = max(part_size, cmd_args.min_size)
         print(f"part_size = {part_size}")
 
         start_time = time.time()
