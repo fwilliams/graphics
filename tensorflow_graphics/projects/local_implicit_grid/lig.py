@@ -274,7 +274,7 @@ def main():
                      norm_similarities=np.array(normal_consistency_losses),
                      runtime=np.array(runtimes))
             real_idx = idx + start_from
-            print(f"{real_idx}/{shape['num_shapes']} failed. Skipping")
+            print(f"Shape {real_idx}/{shape['num_shapes']} failed. Skipping it.")
             continue
 
         n = pcu.estimate_mesh_normals(v, f)
