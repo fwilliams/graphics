@@ -226,10 +226,11 @@ def main():
         chamfer_l2_losses = list(stats['chamfer_loss_l2'])
         hausdorff_losses = list(stats['hausdorff_loss'])
         normal_consistency_losses = list(stats['norm_similarities'])
-        runtimes = list(stats['runtimes'])
+        runtimes = list(stats['runtime'])
         assert len(iou_losses) == len(chamfer_l2_losses) == len(hausdorff_losses) == \
                len(normal_consistency_losses) == len(runtimes)
         start_from = len(iou_losses)
+        print(f"Resuming from index {start_from}")
     else:
         assert False, "Unwilling to overwrite existing data"
 
