@@ -258,7 +258,25 @@ def main():
         end_time = time.time()
         runtime = end_time - start_time
 
-        v, f = pcu.load_mesh_vf("in_pts.reconstruct.ply")
+        try:
+            v, f = pcu.load_mesh_vf("in_pts.reconstruct.ply")
+        except FileNotFoundError:
+            # The reconstruction failed, skip
+            iou_losses.append(np.nan)
+            chamfer_l2_losses.append(np.nan)
+            hausdorff_losses.append(np.nan)
+            normal_consistency_losses.append(np.nan)
+            runtimes.append(np.nan)
+            np.savez(os.path.join(cmd_args.output_path, "stats.npz"),
+                     iou_loss=np.array(iou_losses),
+                     chamfer_loss_l2=np.array(chamfer_l2_losses),
+                     hausdorff_loss=np.array(hausdorff_losses),
+                     norm_similarities=np.array(normal_consistency_losses),
+                     runtime=np.array(runtimes))
+            real_idx = idx + start_from
+            print(f"{real_idx}/{shape['num_shapes']} failed. Skipping")
+            continue
+
         n = pcu.estimate_mesh_normals(v, f)
 
         grid_data = np.load("in_pts.reconstruct.ply.npz")
